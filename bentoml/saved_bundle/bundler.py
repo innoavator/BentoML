@@ -75,8 +75,9 @@ def _write_bento_content_to_dir(bento_service, path):
                 artifact.name,
                 bento_service.name,
             )
-    backend_path = path + "\\backend"
-    frontend_path = path + "\\frontend"
+    frontend_path = os.path.join(path,"frontend")  
+    backend_path = os.path.join(path,"backend") 
+    
     try:
         os.mkdir(backend_path)
     except FileExistsError:
