@@ -50,10 +50,8 @@ from bentoml.utils.usage_stats import track_save
 from bentoml.saved_bundle.config import SavedBundleConfig
 from bentoml.saved_bundle.pip_pkg import get_zipmodules, ZIPIMPORT_DIR
 
-
 DEFAULT_SAVED_BUNDLE_README = """\
 # Generated BentoService bundle - {}:{}
-
 This is a ML Service bundle created with BentoML, it is not recommended to edit
 code or files contained in this directory. Instead, edit the code that uses BentoML
 to create this bundle, and save a new BentoService bundle.
@@ -75,9 +73,9 @@ def _write_bento_content_to_dir(bento_service, path):
                 artifact.name,
                 bento_service.name,
             )
-    frontend_path = os.path.join(path,"frontend")  
-    backend_path = os.path.join(path,"backend") 
-    
+    frontend_path = os.path.join(path, "frontend")
+    backend_path = os.path.join(path, "backend")
+
     try:
         os.mkdir(backend_path)
     except FileExistsError:
@@ -132,8 +130,13 @@ def _write_bento_content_to_dir(bento_service, path):
             )
         )
 
+    # write Dockerfile
+    logger.debug("Using Docker Base Image %s", bento_service._env._python_version)
     with open(os.path.join(backend_path, "Dockerfile"), "w") as f:
-        f.write(ENTHIRE_BACKEND_DOCKERFILE_TEMPLATE)
+        f.write(
+            MODEL_SERVER_DOCKERFILE_CPU.format(
+                python_version=bento_service._env._python_version
+            ))
 
     # copy custom web_static_content if enabled
     if bento_service.web_static_content:
@@ -163,38 +166,38 @@ def _write_bento_content_to_dir(bento_service, path):
         class_name=bento_service.name,
         module_name=module_name,
         apis_list=bento_service.inference_apis,
-        store_path=os.path.join(backend_path,FASTAPI_FILE))
+        store_path=os.path.join(backend_path, FASTAPI_FILE))
 
     bundled_pip_dependencies_path = os.path.join(backend_path, 'bundled_pip_dependencies')
     _bundle_local_bentoml_if_installed_from_source(bundled_pip_dependencies_path)
     # delete mtime and sort file in tarballs to normalize the checksums
     for tarball_file_path in glob.glob(
-        os.path.join(bundled_pip_dependencies_path, '*.tar.gz')
+            os.path.join(bundled_pip_dependencies_path, '*.tar.gz')
     ):
         normalize_gztarball(tarball_file_path)
 
-    #------FRONTEND------
+    # ------FRONTEND------
     # create __init__.py file
     try:
-        open(os.path.join(frontend_path,"__init__.py"),"x")
+        open(os.path.join(frontend_path, "__init__.py"), "x")
     except FileExistsError:
         raise BentoMLException(f"__init__.py already exists")
 
     # create Dockerfile
-    with open(os.path.join(frontend_path,"Dockerfile"),"w") as f:
+    with open(os.path.join(frontend_path, "Dockerfile"), "w") as f:
         f.write(ENTHIRE_FRONTEND_DOCKERFILE_TEMPLATE)
 
     # create requirements.txt
-    with open(os.path.join(frontend_path,"requirements.txt"),"w") as f:
+    with open(os.path.join(frontend_path, "requirements.txt"), "w") as f:
         f.write("requests==2.25.1\n")
         f.write("streamlit==0.82.0")
 
     # Create docker-compose:
-    with open(os.path.join(path,"docker-compose.yml"),"w") as f:
+    with open(os.path.join(path, "docker-compose.yml"), "w") as f:
         f.write(ENTHIRE_DOCKER_COMPOSE)
 
     # Create Streamlit file
-    create_streamlit_main(fastapi_file=FASTAPI_FILE,fastapi_path=backend_path,store_path=frontend_path)
+    create_streamlit_main(fastapi_file=FASTAPI_FILE, fastapi_path=backend_path, store_path=frontend_path)
 
 
 # def _write_bento_content_to_dir(bento_service, path):
@@ -326,7 +329,6 @@ def save_to_dir(bento_service, path, version=None, silent=False):
     """Save given BentoService along with all its artifacts, source code and
     dependencies to target file path, assuming path exist and empty. If target path
     is not empty, this call may override existing files in the given path.
-
     :param bento_service (bentoml.service.BentoService): a Bento Service instance
     :param path (str): Destination of where the bento service will be saved. The
         destination can be local path or remote path. The remote path supports both
