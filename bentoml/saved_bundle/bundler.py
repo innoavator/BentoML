@@ -49,6 +49,7 @@ from bentoml.utils.tempdir import TempDirectory
 from bentoml.utils.usage_stats import track_save
 from bentoml.saved_bundle.config import SavedBundleConfig
 from bentoml.saved_bundle.pip_pkg import get_zipmodules, ZIPIMPORT_DIR
+from inspect import signature
 
 
 DEFAULT_SAVED_BUNDLE_README = """\
@@ -59,10 +60,18 @@ code or files contained in this directory. Instead, edit the code that uses Bent
 to create this bundle, and save a new BentoService bundle.
 """
 
+SUPPORTED_DATATYPES = ['int', 'str', 'list', 'float', 'fastapi.datastructures.UploadFile']
+
 FASTAPI_FILE = "fastapi_file.py"
 
 logger = logging.getLogger(__name__)
 
+
+def validate_input_datatypes(user_func):
+    types = []
+    for key, value in signature(user_func).parameters.items():
+        types.append(str(value).split()[1])
+    return set(types).issubset(SUPPORTED_DATATYPES)
 
 def _write_bento_content_to_dir(bento_service, path):
     if not os.path.exists(path):
@@ -75,9 +84,16 @@ def _write_bento_content_to_dir(bento_service, path):
                 artifact.name,
                 bento_service.name,
             )
-    frontend_path = os.path.join(path,"frontend")  
-    backend_path = os.path.join(path,"backend") 
-    
+
+    frontend_path = os.path.join(path, "frontend")
+    backend_path = os.path.join(path, "backend")
+
+    for apis in range(len(bento_service.inference_apis)):
+        if validate_input_datatypes(bento_service.inference_apis[apis]._user_func) != True:
+            raise BentoMLException(
+                f"API argument datatype not supported. Please check the docs for more info"
+            )
+
     try:
         os.mkdir(backend_path)
     except FileExistsError:
