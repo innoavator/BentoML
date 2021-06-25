@@ -37,7 +37,6 @@ except ImportError:
     click_completion = None
     shell_types = click.Choice(['bash', 'zsh', 'fish', 'powershell'])
 
-
 yatai_proto = LazyLoader('yatai_proto', globals(), 'bentoml.yatai.proto')
 
 
@@ -58,29 +57,29 @@ def escape_shell_params(param):
 
 @inject
 def create_bento_service_cli(
-    pip_installed_bundle_path: str = None,
-    default_yatai_url: str = None,
-    default_port: int = Provide[BentoMLContainer.config.bento_server.port],
-    default_enable_microbatch: bool = Provide[
-        BentoMLContainer.config.bento_server.microbatch.enabled
-    ],
-    default_mb_max_batch_size: int = Provide[
-        BentoMLContainer.config.bento_server.microbatch.max_batch_size
-    ],
-    default_mb_max_latency: int = Provide[
-        BentoMLContainer.config.bento_server.microbatch.max_latency
-    ],
-    default_run_with_ngrok: bool = Provide[
-        BentoMLContainer.config.bento_server.ngrok.enabled
-    ],
-    default_enable_swagger: bool = Provide[
-        BentoMLContainer.config.bento_server.swagger.enabled
-    ],
-    default_workers: int = Provide[BentoMLContainer.config.bento_server.workers],
-    default_microbatch_workers: int = Provide[
-        BentoMLContainer.config.bento_server.microbatch.workers
-    ],
-    default_timeout: int = Provide[BentoMLContainer.config.bento_server.timeout],
+        pip_installed_bundle_path: str = None,
+        default_yatai_url: str = None,
+        default_port: int = Provide[BentoMLContainer.config.bento_server.port],
+        default_enable_microbatch: bool = Provide[
+            BentoMLContainer.config.bento_server.microbatch.enabled
+        ],
+        default_mb_max_batch_size: int = Provide[
+            BentoMLContainer.config.bento_server.microbatch.max_batch_size
+        ],
+        default_mb_max_latency: int = Provide[
+            BentoMLContainer.config.bento_server.microbatch.max_latency
+        ],
+        default_run_with_ngrok: bool = Provide[
+            BentoMLContainer.config.bento_server.ngrok.enabled
+        ],
+        default_enable_swagger: bool = Provide[
+            BentoMLContainer.config.bento_server.swagger.enabled
+        ],
+        default_workers: int = Provide[BentoMLContainer.config.bento_server.workers],
+        default_microbatch_workers: int = Provide[
+            BentoMLContainer.config.bento_server.microbatch.workers
+        ],
+        default_timeout: int = Provide[BentoMLContainer.config.bento_server.timeout],
 ):
     # pylint: disable=unused-variable
 
@@ -147,7 +146,7 @@ def create_bento_service_cli(
         type=click.STRING,
         default=default_yatai_url,
         help='Remote YataiService URL. Optional. '
-        'Example: "--yatai-url http://localhost:50050"',
+             'Example: "--yatai-url http://localhost:50050"',
     )
     def info(bento=None, yatai_url=None):
         """
@@ -173,7 +172,7 @@ def create_bento_service_cli(
         type=click.STRING,
         default=default_yatai_url,
         help='Remote YataiService URL. Optional. '
-        'Example: "--yatai-url http://localhost:50050"',
+             'Example: "--yatai-url http://localhost:50050"',
     )
     def open_api_spec(bento=None, yatai_url=None):
         saved_bundle_path = resolve_bundle_path(
@@ -203,7 +202,7 @@ def create_bento_service_cli(
         is_flag=True,
         default=default_run_with_ngrok,
         help="Use ngrok to relay traffic on a public endpoint to this "
-        "API server on localhost",
+             "API server on localhost",
         envvar='BENTOML_ENABLE_NGROK',
     )
     @click.option(
@@ -211,7 +210,7 @@ def create_bento_service_cli(
         type=click.STRING,
         default=default_yatai_url,
         help='Remote YataiService URL. Optional. '
-        'Example: "--yatai-url http://localhost:50050"',
+             'Example: "--yatai-url http://localhost:50050"',
     )
     @click.option(
         '--enable-swagger/--disable-swagger',
@@ -221,14 +220,14 @@ def create_bento_service_cli(
         envvar='BENTOML_ENABLE_SWAGGER',
     )
     def serve(
-        port,
-        bento,
-        enable_microbatch,
-        mb_max_batch_size,
-        mb_max_latency,
-        run_with_ngrok,
-        yatai_url,
-        enable_swagger,
+            port,
+            bento,
+            enable_microbatch,
+            mb_max_batch_size,
+            mb_max_latency,
+            run_with_ngrok,
+            yatai_url,
+            enable_swagger,
     ):
         saved_bundle_path = resolve_bundle_path(
             bento, pip_installed_bundle_path, yatai_url
@@ -243,6 +242,57 @@ def create_bento_service_cli(
             run_with_ngrok=run_with_ngrok,
             enable_swagger=enable_swagger,
         )
+
+    # Example Usage: bentoml save-direct --path={PATH}
+    @bentoml_cli.command(
+        help="Generate and save the entire module from a python file",
+        short_help="Save module from path",
+    )
+    @click.option(
+        '--path',
+        type=click.STRING,
+        default=".",
+        help='The path to .py file'
+             'Example: "--path D:\PythonProjects\HelloWorld.py"'
+             'Example: "--path HelloWorld.py"',
+    )
+    def save_direct(
+            path
+    ):
+        if path[-2:] != "py":
+            raise Exception("the file is not a python file")
+
+        import os
+        import importlib
+        import inspect
+        from bentoml import BentoService
+        complete_path = os.path.join(os.getcwd(), path)
+        head, module_name = os.path.split(complete_path)
+        sys.path.append(head)
+        module_name = module_name[:-3]
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as e:
+            raise Exception(f"Couldn't import module:", e)
+
+        count = 0
+        class_names = []
+        for name, obj in inspect.getmembers(module):
+            try:
+                if inspect.isclass(obj) and issubclass(obj, BentoService) and \
+                        getattr(obj, '__module__', None).split(".")[0] != "bentoml":
+                    count += 1
+                    class_names.append(obj.__name__)
+            except:
+                pass
+        _echo(f"Found {count} classes to save")
+        for i in class_names:
+            try:
+                init = getattr(module, i)
+                init().save()
+            except Exception as e:
+                _echo(f"Couldn't save {i}")
+        _echo("Saved all the necessary modules.")
 
     # Example Usage:
     # bentoml serve-gunicorn {BUNDLE_PATH} --port={PORT} --workers={WORKERS}
@@ -286,7 +336,7 @@ def create_bento_service_cli(
         type=click.STRING,
         default=default_yatai_url,
         help='Remote YataiService URL. Optional. '
-        'Example: "--yatai-url http://localhost:50050"',
+             'Example: "--yatai-url http://localhost:50050"',
     )
     @click.option(
         '--enable-swagger/--disable-swagger',
@@ -296,16 +346,16 @@ def create_bento_service_cli(
         envvar='BENTOML_ENABLE_SWAGGER',
     )
     def serve_gunicorn(
-        port,
-        workers,
-        timeout,
-        bento,
-        enable_microbatch,
-        mb_max_batch_size,
-        mb_max_latency,
-        microbatch_workers,
-        yatai_url,
-        enable_swagger,
+            port,
+            workers,
+            timeout,
+            bento,
+            enable_microbatch,
+            mb_max_batch_size,
+            mb_max_latency,
+            microbatch_workers,
+            yatai_url,
+            enable_swagger,
     ):
         if not psutil.POSIX:
             _echo(
@@ -366,7 +416,7 @@ def create_bento_service_cli(
         '-t',
         '--tag',
         help="Optional image tag. If not specified, Bento will generate one from "
-        "the name of the Bento.",
+             "the name of the Bento.",
         required=False,
         callback=validate_tag,
     )
@@ -378,8 +428,8 @@ def create_bento_service_cli(
         type=click.STRING,
         default=default_yatai_url,
         help='Specify the YataiService for running the containerization, default to '
-        'the Local YataiService with local docker daemon. Example: '
-        '"--yatai-url http://localhost:50050"',
+             'the Local YataiService with local docker daemon. Example: '
+             '"--yatai-url http://localhost:50050"',
     )
     def containerize(bento, push, tag, build_arg, yatai_url):
         """Containerize specified BentoService.
