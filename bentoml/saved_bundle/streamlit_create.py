@@ -45,12 +45,15 @@ if api_selection=={what}:
     """
     method_tail = """\
 ll={}
-    for param in parameters:
-        input_selection = selection(param['title'])
-        input = return_input_type(input_selection,param['title'])
-        ll[param['title']] = input
-    output = requests.request(method=http_method, data=ll, url=url, headers={'Content-Type': 'application/json'})
-    st.write(output.content) 
+    with st.form(key="Input_Form"):
+        for param in parameters:
+            input_selection = selection(param['title'])
+            input = return_input_type(input_selection,param['title'])
+            ll[param['title']] = input
+        submit_button = st.form_submit_button(label='Submit')
+    if submit_button:
+        output = requests.request(method=http_method, data=ll, url=url, headers={'Content-Type': 'application/json'})
+        st.write(output.content) 
     """
     for val in list_params:
         parms = val['parameters'] if 'parameters' in val else []

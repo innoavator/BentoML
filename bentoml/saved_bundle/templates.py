@@ -79,8 +79,7 @@ COPY . /
 ENV PORT 5000
 EXPOSE $PORT
 
-CMD ["bentoml", "serve", "."]
-
+CMD ["python", "fastapi_file.py",""]
 """  # noqa: E501
 
 INIT_PY_TEMPLATE = """\
@@ -154,8 +153,6 @@ CMD ["bentoml", "serve", "./"]
 
 ENTHIRE_FRONTEND_DOCKERFILE_TEMPLATE="""\
 FROM python:3.8-slim
-
-WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
