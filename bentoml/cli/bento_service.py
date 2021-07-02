@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 import sys
+
 import click
 import psutil
 from dependency_injector.wiring import Provide, inject
@@ -260,54 +261,49 @@ def create_bento_service_cli(
             bento,
             yatai_url,
     ):
-        saved_bundle_path = resolve_bundle_path(
-            bento, pip_installed_bundle_path, yatai_url
-        )
         import os
-        import uuid
+        import json
         import shutil
-        import boto3
-        import paramiko
+        import requests
+        import uuid
 
         def create_unique_name(name):
             return ''.join([name, "-", str(uuid.uuid4())])
 
+        S3_URL = "https://nwkvz4at57.execute-api.eu-west-1.amazonaws.com/v1/s3uri?region={region}&key_name={key_name}"
+        DOCKER_URL = "https://nwkvz4at57.execute-api.eu-west-1.amazonaws.com/v1/docker?repository_name={repository_name}&region={region}&s3_uri={s3_uri}"
+
+        saved_bundle_path = resolve_bundle_path(
+            bento, pip_installed_bundle_path, yatai_url
+        )
+        # Zip the files
         dir_path = saved_bundle_path
         head, tail = os.path.split(dir_path)
-        path = shutil.make_archive(os.path.join(head, tail), 'zip', dir_path)
-        print("done zipping")
+        path = shutil.make_archive(os.path.join(head, create_unique_name(tail)), 'zip', dir_path)
+        head, key_name = os.path.split(path)
+        _echo("Done zipping")
 
-        # # TODO: This part needs to be in a server of our own
-        # # # upload to s3
-        AWS_SERVER_PUBLIC_KEY = "AKIAUJMKTP5U5J2K2H4Q"
-        AWS_SERVER_SECRET_KEY = "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"
-        bucket_name = "notebook-to-prod"
-        pvt_key_path = "D:\\aws_keys\\notebook-to-prod.pem"
-        repository_name = f"lambda-{str(uuid.uuid4())[:8]}"
-        region = "eu-west-1"
-        ipv4_address = "34.244.31.222"
-        username = "ec2-user"
+        # Send to S3
+        get_presigned_url = S3_URL.format(region="eu-west-1", key_name=key_name)
+        response = requests.get(get_presigned_url)
+        presigned_url = json.loads(response.text)["url"]
+        with open(path, "rb") as f:
+            file_obj = f.read()
+        response = requests.put(presigned_url, data=file_obj)
+        if response.status_code != 200:
+            raise Exception(f"ERROR: status code: {response.status_code}; reason : {response.text}")
+        bucket_name = presigned_url.split("/")[2].split(".")[0]
+        s3_uri = f"s3://{bucket_name}/{key_name}"
+        _echo("File Uploaded to s3")
 
-        s3_conn = boto3.resource("s3", region_name=region, aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
-                                 aws_secret_access_key=AWS_SERVER_SECRET_KEY)
-        bucket = s3_conn.Bucket(bucket_name)
-        key_path = create_unique_name(tail)
-        bucket.upload_file(path, key_path)
-        s3_uri = f"s3://{bucket_name}/{key_path}"
-        print("s3 uploaded", s3_uri)
-
-        key = paramiko.RSAKey.from_private_key_file(pvt_key_path)
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        cmd = f"python3 /home/ec2-user/automation/ec2_script.py --repository_name {repository_name} --region {region} --s3_uri {s3_uri}"
-        try:
-            client.connect(hostname=ipv4_address, username=username, pkey=key)
-            stdin, stdout, stderr = client.exec_command(cmd)
-            res = stdout.read()
-            print(res.decode())
-            client.close()
-        except Exception as e:
-            print(e)
+        # Create Docker
+        repository_name = create_unique_name("docker")
+        docker_url = DOCKER_URL.format(repository_name=repository_name, region="eu-west-1", s3_uri=s3_uri)
+        response = requests.post(docker_url)
+        if response.status_code != 200:
+            raise Exception(f"ERROR: status code: {response.status_code}; reason : {response.text}")
+        result = json.loads(response.text)
+        _echo(result)
 
     # Example Usage: bentoml save-direct --path={PATH}
     @bentoml_cli.command(
