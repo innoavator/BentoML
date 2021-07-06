@@ -246,7 +246,7 @@ def create_bento_service_cli(
 
     # Example Usage: bentoml deploy {BUNDLE_PATH}
     @bentoml_cli.command(
-        help="Deploy your module on AWS lambda.",
+        help="Deploy your module on AWS.",
         short_help="Deploy your endpoint on AWS.",
     )
     @conditional_argument(pip_installed_bundle_path is None, "bento", type=click.STRING)
@@ -257,9 +257,17 @@ def create_bento_service_cli(
         help='Remote YataiService URL. Optional. '
              'Example: "--yatai-url http://localhost:50050"',
     )
+    @click.option(
+        '--region',
+        type=click.STRING,
+        default="eu-west-1",
+        help='Region where you want to deploy. Optional'
+             'Example: "--region eu-west-1"',
+    )
     def deploy(
             bento,
             yatai_url,
+            region
     ):
         import os
         import json
@@ -267,43 +275,76 @@ def create_bento_service_cli(
         import requests
         import uuid
 
-        def create_unique_name(name):
+        ENTHIRE_FRONTEND_DOCKERFILE_TEMPLATE = """\
+        FROM python:3.8-slim
+
+        COPY requirements.txt .
+        RUN pip install -r requirements.txt
+
+        COPY . .
+        
+        ENV BACKEND_URL={backend_api_url}
+        
+        EXPOSE 8501
+
+        CMD ["streamlit", "run", "main.py"]
+        """
+
+        CORTEX_URL = "http://34.200.214.52:5000/cortex?repository_uri={ecr_uri}"
+        DOCKER_URL = "http://34.200.214.52:5000/docker?repository_name={repository_name}&region={region}"
+
+        def create_unique_name(name: str):
             return ''.join([name, "-", str(uuid.uuid4())])
 
-        S3_URL = "https://nwkvz4at57.execute-api.eu-west-1.amazonaws.com/v1/s3uri?region={region}&key_name={key_name}"
-        DOCKER_URL = "https://nwkvz4at57.execute-api.eu-west-1.amazonaws.com/v1/docker?repository_name={repository_name}&region={region}&s3_uri={s3_uri}"
+        def create_zip_file(dir_path: str):
+            head, tail = os.path.split(dir_path)
+            path = shutil.make_archive(os.path.join(head, create_unique_name(tail)), 'zip', dir_path)
+            head, key_name = os.path.split(path)
+            return path, key_name
+
+        def create_docker(key_name, zipped_file_path, deploy_region="eu-west-1"):
+            repository_name = create_unique_name(key_name.split(".")[0])
+            docker_url = DOCKER_URL.format(repository_name=repository_name, region=deploy_region)
+            files = [
+                ('file', (key_name, open(zipped_file_path, 'rb'),
+                          'application/zip'))
+            ]
+            response = requests.request("POST", docker_url, files=files)
+            _echo(response.text)
+            ecr_uri = json.loads(response.text)['ecr_uri']
+            return ecr_uri
+
+        def create_cortex_api(ecr_uri):
+            cortex_url = CORTEX_URL.format(ecr_uri=ecr_uri)
+            response = requests.request("GET", cortex_url)
+            backend_api_url = response.text
+            return backend_api_url
 
         saved_bundle_path = resolve_bundle_path(
             bento, pip_installed_bundle_path, yatai_url
         )
-        # Zip the files
-        dir_path = saved_bundle_path
-        head, tail = os.path.split(dir_path)
-        path = shutil.make_archive(os.path.join(head, create_unique_name(tail)), 'zip', dir_path)
-        head, key_name = os.path.split(path)
-        _echo("Done zipping")
 
-        # Send to S3
-        get_presigned_url = S3_URL.format(region="eu-west-1", key_name=key_name)
-        response = requests.get(get_presigned_url)
-        presigned_url = json.loads(response.text)["url"]
-        with open(path, "rb") as f:
-            file_obj = f.read()
-        response = requests.put(presigned_url, data=file_obj)
-        if response.status_code != 200:
-            raise Exception(f"ERROR: status code: {response.status_code}; reason : {response.text}")
-        bucket_name = presigned_url.split("/")[2].split(".")[0]
-        s3_uri = f"s3://{bucket_name}/{key_name}"
-        _echo("File Uploaded to s3")
+        _echo("Zipping backend files")
+        backend_path, backend_key_name = create_zip_file(saved_bundle_path)
+        _echo("Creating docker image for backend")
+        backend_docker_uri = create_docker(backend_key_name, backend_path, region)
+        _echo("Creating Backend API")
+        backend_cortex_uri = create_cortex_api(backend_docker_uri)
+        _echo(f"Backend API at : {backend_cortex_uri}")
 
-        # Create Docker
-        repository_name = create_unique_name("docker")
-        docker_url = DOCKER_URL.format(repository_name=repository_name, region="eu-west-1", s3_uri=s3_uri)
-        response = requests.post(docker_url)
-        if response.status_code != 200:
-            raise Exception(f"ERROR: status code: {response.status_code}; reason : {response.text}")
-        result = json.loads(response.text)
-        _echo(result)
+        # Create Dockerfile for frontend
+        frontend_dir_path = os.path.join(os.path.split(saved_bundle_path)[0], "frontend")
+        frontend_dockerfile = ENTHIRE_FRONTEND_DOCKERFILE_TEMPLATE.format(backend_api_url=backend_cortex_uri)
+        with open(os.path.join(frontend_dir_path, "Dockerfile"), "w") as f:
+            f.write(frontend_dockerfile)
+
+        _echo("Zipping frontend files")
+        frontend_path, frontend_key_name = create_zip_file(frontend_dir_path)
+        _echo("Creating docker image for frontend")
+        frontend_docker_uri = create_docker(frontend_key_name, frontend_path, region)
+        _echo("Creating frontend API")
+        frontend_cortex_uri = create_cortex_api(frontend_docker_uri)
+        _echo(f"Frontend API at : {frontend_cortex_uri}")
 
     # Example Usage: bentoml save-direct --path={PATH}
     @bentoml_cli.command(
