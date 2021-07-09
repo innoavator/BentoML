@@ -79,7 +79,7 @@ COPY . /
 ENV PORT 5000
 EXPOSE $PORT
 
-CMD ["python", "fastapi_file.py",""]
+CMD ["python", "fastapi_file.py"]
 """  # noqa: E501
 
 INIT_PY_TEMPLATE = """\

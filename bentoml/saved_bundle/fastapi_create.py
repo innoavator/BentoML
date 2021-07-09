@@ -24,11 +24,14 @@ app.add_api_route(
         """
 template3 = """
 if __name__ == "__main__":
-    {func_name}.artifacts.load_all(file)
+    try:
+        {func_name}.artifacts.load_all(file)
+    except:
+        print("failed to load model or didn't find any.")
     uvicorn.run(
             app=app,
             host='0.0.0.0',
-            port=8080
+            port=5000
         )\n"""
 
 

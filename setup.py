@@ -31,10 +31,12 @@ install_requires = [
     "deepmerge",
     "dependency-injector>=4.0,<5.0",
     "docker",
+    "fastapi",
     "flask",
     "grpcio",
     "gunicorn",
     "humanfriendly",
+    "multipledispatch",
     "numpy",
     "packaging",
     "prometheus_client",
@@ -44,6 +46,7 @@ install_requires = [
     # works for both
     "python-dateutil>=2.7.3,<3.0.0",
     "python-json-logger",
+    "PyYAML",
     "requests",
     "ruamel.yaml>=0.15.0",
     "schema",
@@ -53,6 +56,7 @@ install_requires = [
     'contextvars;python_version < "3.7"',
     'dataclasses;python_version < "3.7"',
     "chardet",
+    "uvicorn"
 ]
 
 yatai_service_requires = [
