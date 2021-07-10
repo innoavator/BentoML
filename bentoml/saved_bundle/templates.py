@@ -187,6 +187,7 @@ services:
 ENTHIRE_STREAMLIT_TEMPLATE = """\
 import requests
 import streamlit as st
+import os
 
 def return_input_type(input_selection=None, param=None):
     if input_selection=="text_input":return st.text_input(f'Write some text for {param}'),
