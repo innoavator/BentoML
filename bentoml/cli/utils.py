@@ -12,20 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import json
+import logging
+import os
+import shutil
 import sys
 import threading
-import itertools
 import time
-import logging
+import uuid
 from datetime import datetime
+from typing import Optional
 
 import humanfriendly
+import requests
+import yaml
 from tabulate import tabulate
 
 from bentoml.cli.click_utils import _echo
-from bentoml.utils import pb_to_yaml
 from bentoml.exceptions import BentoMLException
+from bentoml.utils import pb_to_yaml
+from bentoml.utils import resolve_bundle_path
+from bentoml.utils.tempdir import TempDirectory
 
 logger = logging.getLogger(__name__)
 
@@ -174,12 +182,12 @@ def _print_deployments_table(deployments, wide=False):
             deployment.name,
             deployment.namespace,
             DeploymentSpec.DeploymentOperator.Name(deployment.spec.operator)
-            .lower()
-            .replace('_', '-'),
+                .lower()
+                .replace('_', '-'),
             f'{deployment.spec.bento_name}:{deployment.spec.bento_version}',
             DeploymentState.State.Name(deployment.state.state)
-            .lower()
-            .replace('_', ' '),
+                .lower()
+                .replace('_', ' '),
             _format_deployment_age_for_print(deployment),
         ]
         if wide:
@@ -197,3 +205,216 @@ def _print_deployments_info(deployments, output_type):
     else:
         for deployment in deployments:
             _print_deployment_info(deployment, output_type)
+
+
+def simple_deploy(cortex_name, cortex_type, region, bento_path: Optional[str] = None,
+                  direct_path: Optional[str] = None):
+    """
+    Zips and deploys your module on AWS
+    """
+    CORTEX_URL = "http://<EC2_Instance_IPV4_Address>:5000/cortex?repository_uri={ecr_uri}&cortex_type={cortex_type}&cortex_name={cortex_name}"
+    DOCKER_URL = "http://<EC2_Instance_IPV4_Address>:5000/docker?repository_name={repository_name}&region={region}"
+
+    def create_unique_name(name: str):
+        name = ''.join([name, "-", str(uuid.uuid4())])[:40]
+        if name[:-1] == "-":
+            name = name[:-1]
+        return name
+
+    def create_zip_file(dir_path: str):
+        head, tail = os.path.split(dir_path)
+        path = shutil.make_archive(os.path.join(head, create_unique_name(tail)), 'zip', dir_path)
+        head, key_name = os.path.split(path)
+        return path, key_name
+
+    def create_docker(key_name, zipped_file_path, deploy_region="us-east-1"):
+        repository_name = create_unique_name(key_name.split(".")[0])
+        docker_url = DOCKER_URL.format(repository_name=repository_name, region=deploy_region)
+        files = [
+            ('file', (key_name, open(zipped_file_path, 'rb'),
+                      'application/zip'))
+        ]
+        response = requests.request("POST", docker_url, files=files)
+        _echo(response.text)
+        ecr_uri = json.loads(response.text)['ecr_uri'].split(" ")[-1]
+        return ecr_uri
+
+    def create_cortex_api(ecr_uri, cortx_type, cortx_name):
+        cortex_url = CORTEX_URL.format(ecr_uri=ecr_uri, cortex_type=cortx_type, cortex_name=cortx_name)
+        response = requests.request("GET", cortex_url)
+        backend_api_url = response.text
+        backend_api_url = backend_api_url.replace("\n", "")
+        backend_api_url = json.loads(backend_api_url)['api_endpoint']
+        return backend_api_url
+
+    if bento_path:
+        saved_bundle_path = resolve_bundle_path(
+            bento_path, None, None
+        )
+    else:
+        saved_bundle_path = direct_path
+
+    _echo("Zipping backend files")
+    backend_path, backend_key_name = create_zip_file(saved_bundle_path)
+    _echo("Creating docker image for backend")
+    backend_docker_uri = create_docker(backend_key_name, backend_path, region)
+    _echo("Creating Backend API")
+    backend_cortex_uri = create_cortex_api(backend_docker_uri, cortex_type, cortex_name)
+    _echo(f"Backend API at : {backend_cortex_uri}")
+    return backend_cortex_uri
+
+
+def complex_deploy(cortex_name, cortex_type, bento_path, region, model_name, model_type, model_url):
+    """
+    Adds files to module to download models from url and pack it with the python file.
+    """
+    saved_bundle_path = resolve_bundle_path(
+        bento_path, None, None
+    )
+    with open(os.path.join(saved_bundle_path, "bentoml.yml"), "r") as f:
+        graph = yaml.safe_load(f)
+    class_name = graph['metadata']['service_name']
+    module_name = graph['metadata']['module_name']
+    py_version = graph['env']['python_version']
+
+    fastapi_file_script = f"""\
+from fastapi import FastAPI
+import requests
+import os
+import subprocess
+
+app = FastAPI(title="{cortex_name}")
+
+@app.get("/create")
+def task():
+
+    try:
+        mod=importlib.import_module("{class_name}.{module_name}")
+        IrisClassifier=mod.{class_name}
+    except Exception as e:
+        return "ERROR : %s"%e
+
+    url = "{model_url}"
+    try:
+        response = requests.get(url)
+        if not os.path.exists("tmp_folder"):
+            os.mkdir("tmp_folder")
+        model_path=os.path.join("tmp_folder","{model_name}")
+        with open(model_path,"wb") as f:
+            f.write(response.content)
+    except Exception as e:
+        return "ERROR : %s"%e
+
+    try:
+        from bentoml import api, BentoService, artifacts
+        from bentoml.frameworks import {model_type}    
+        model={model_type}("{model_name_only}")
+        clf=model.load("tmp_folder").get()
+    except Exception as e:
+        return "ERROR : %s"%e
+
+    try:
+        bento_class={class_name}()
+        bento_class.pack("model",clf)
+        bento_class.save()
+    except Exception as e:
+        return "ERROR : %s"%e
+
+    try:
+        res=subprocess.check_output(["bentoml","deploy","{class_name}:latest","--region","{region}","--cortex-name","{cortex_name}","--cortex-type","{cortex_type}"],stdout=subprocess.PIPE)
+        return res.decode()
+    except Exception as e:
+        return "ERROR : %s"%e
+"""
+
+    ffs = fastapi_file_script.format(
+        class_name=class_name,
+        module_name=module_name,
+        cortex_name=cortex_name,
+        cortex_type=cortex_type,
+        region=region,
+        model_name=model_name,
+        model_name_only=model_name.split(".")[0],
+        model_type=model_type,
+        model_url=model_url
+    )
+
+    dockerfile = """\
+FROM python:{py_version}
+
+COPY requirements.txt /
+RUN pip install -r ./requirements.txt --no-cache-dir
+
+COPY . /
+
+CMD ["uvicorn","bento_script:app","--reload","--port","5000","--host","0.0.0.0"]
+"""
+    dockerfile = dockerfile.format(py_version=py_version)
+
+    with open(os.path.join(saved_bundle_path, "bento_script.py"), "w") as f:
+        f.write(ffs)
+    with open(os.path.join(saved_bundle_path, "Dockerfile"), "w") as f:
+        f.write(dockerfile)
+
+    simple_deploy(cortex_name, cortex_type, bento_path, region)
+
+
+def create_python_file(api_endpoints, region):
+    """
+    Creates a python file to hit all endpoints in the pipeline.
+    """
+
+    def create_unique_name(name: str):
+        name = ''.join([name, "-", str(uuid.uuid4())])[:40]
+        if name[:-1] == "-":
+            name = name[:-1]
+        return name
+
+    python_script = """\
+from fastapi import FastAPI
+import requests
+
+app = FastAPI(title="Bundled Requests")
+
+@app.get("/")
+def pipeline():
+    api_endpoints={api_endpoints}
+
+    for api in api_endpoints:
+        try:
+            response = requests.get(api)
+            if response.status_code!=200:
+                return "ERROR : %s"%response.text
+        except Exception as e:
+            return "ERROR : %s"%e
+    return "Pipeline completed!"
+    """
+    dockerfile = """\
+FROM python:3.8-slim
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["uvicorn", "main:app", "--reload","--host","0.0.0.0","--port","5000"]
+    """
+    requirements = """\
+fastapi
+uvicorn
+requests
+    """
+    with TempDirectory() as tmp_dir:
+        python_script = python_script.format(api_endpoints=api_endpoints)
+        with open(os.path.join(tmp_dir, "main.py"), "w") as f:
+            f.write(python_script)
+        with open(os.path.join(tmp_dir, "Dockerfile"), "w") as f:
+            f.write(dockerfile)
+        with open(os.path.join(tmp_dir, "requirements.txt"), "w") as f:
+            f.write(requirements)
+        api_endpoint = simple_deploy(cortex_name=create_unique_name("pipeline"), cortex_type="RealtimeAPI",
+                                     region=region,
+                                     direct_path=tmp_dir)
+        return api_endpoint
