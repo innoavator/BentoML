@@ -207,13 +207,13 @@ def _print_deployments_info(deployments, output_type):
             _print_deployment_info(deployment, output_type)
 
 
-def simple_deploy(cortex_name, cortex_type, region, bento_path: Optional[str] = None,
+def simple_deploy(cortex_name, cortex_type, region, cortex_url, bento_path: Optional[str] = None,
                   direct_path: Optional[str] = None):
     """
     Zips and deploys your module on AWS
     """
-    CORTEX_URL = "http://<EC2_Instance_IPV4_Address>:5000/cortex?repository_uri={ecr_uri}&cortex_type={cortex_type}&cortex_name={cortex_name}"
-    DOCKER_URL = "http://<EC2_Instance_IPV4_Address>:5000/docker?repository_name={repository_name}&region={region}"
+    CORTEX_URL = "{cortex_url}cortex?repository_uri={ecr_uri}&cortex_type={cortex_type}&cortex_name={cortex_name}"
+    DOCKER_URL = "{cortex_url}docker?repository_name={repository_name}&region={region}"
 
     def create_unique_name(name: str):
         name = ''.join([name, "-", str(uuid.uuid4())])[:40]
@@ -229,7 +229,7 @@ def simple_deploy(cortex_name, cortex_type, region, bento_path: Optional[str] = 
 
     def create_docker(key_name, zipped_file_path, deploy_region="us-east-1"):
         repository_name = create_unique_name(key_name.split(".")[0])
-        docker_url = DOCKER_URL.format(repository_name=repository_name, region=deploy_region)
+        docker_url = DOCKER_URL.format(cortex_url=cortex_url, repository_name=repository_name, region=deploy_region)
         files = [
             ('file', (key_name, open(zipped_file_path, 'rb'),
                       'application/zip'))
@@ -240,8 +240,9 @@ def simple_deploy(cortex_name, cortex_type, region, bento_path: Optional[str] = 
         return ecr_uri
 
     def create_cortex_api(ecr_uri, cortx_type, cortx_name):
-        cortex_url = CORTEX_URL.format(ecr_uri=ecr_uri, cortex_type=cortx_type, cortex_name=cortx_name)
-        response = requests.request("GET", cortex_url)
+        cortex_endpoint = CORTEX_URL.format(cortex_url=cortex_url, ecr_uri=ecr_uri, cortex_type=cortx_type,
+                                            cortex_name=cortx_name)
+        response = requests.request("GET", cortex_endpoint)
         backend_api_url = response.text
         backend_api_url = backend_api_url.replace("\n", "")
         backend_api_url = json.loads(backend_api_url)['api_endpoint']
@@ -264,7 +265,7 @@ def simple_deploy(cortex_name, cortex_type, region, bento_path: Optional[str] = 
     return backend_cortex_uri
 
 
-def complex_deploy(cortex_name, cortex_type, bento_path, region, model_name, model_type, model_url):
+def complex_deploy(cortex_name, cortex_type, bento_path, region, model_name, model_type, model_url, cortex_url):
     """
     Adds files to module to download models from url and pack it with the python file.
     """
@@ -277,7 +278,7 @@ def complex_deploy(cortex_name, cortex_type, bento_path, region, model_name, mod
     module_name = graph['metadata']['module_name']
     py_version = graph['env']['python_version']
 
-    fastapi_file_script = f"""\
+    fastapi_file_script = """\
 from fastapi import FastAPI
 import requests
 import os
@@ -356,10 +357,10 @@ CMD ["uvicorn","bento_script:app","--reload","--port","5000","--host","0.0.0.0"]
     with open(os.path.join(saved_bundle_path, "Dockerfile"), "w") as f:
         f.write(dockerfile)
 
-    simple_deploy(cortex_name, cortex_type, bento_path, region)
+    simple_deploy(cortex_name, cortex_type, bento_path, region, cortex_url)
 
 
-def create_python_file(api_endpoints, region):
+def create_python_file(api_endpoints, region, cortex_url):
     """
     Creates a python file to hit all endpoints in the pipeline.
     """
@@ -416,5 +417,6 @@ requests
             f.write(requirements)
         api_endpoint = simple_deploy(cortex_name=create_unique_name("pipeline"), cortex_type="RealtimeAPI",
                                      region=region,
-                                     direct_path=tmp_dir)
+                                     direct_path=tmp_dir,
+                                     cortex_url=cortex_url)
         return api_endpoint

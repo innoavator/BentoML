@@ -278,19 +278,28 @@ def create_bento_service_cli(
         help='Type of deployment. Optional'
              'Example: "--cortex-type RealtimeAPI"',
     )
+    @click.option(
+        '--cortex-url',
+        type=click.STRING,
+        default="None",
+        help='URL Endpoint'
+             'Example: "--cortex-url http://34.244.31.222:5000/"',
+    )
     def deploy(
             bento,
             yatai_url,
             region,
             cortex_name,
-            cortex_type
+            cortex_type,
+            cortex_url
     ):
 
         simple_deploy(
             cortex_name=cortex_name,
             cortex_type=cortex_type,
             bento_path=bento,
-            region=region
+            region=region,
+            cortex_url=cortex_url
         )
 
     # Example Usage : bentoml group-config --path config.yaml
@@ -306,8 +315,16 @@ def create_bento_service_cli(
              'Example: "--path D:\PythonProjects\config.yaml"'
              'Example: "--path config.yaml"',
     )
+    @click.option(
+        '--cortex-url',
+        type=click.STRING,
+        default="None",
+        help='URL Endpoint'
+             'Example: "--cortex-url http://34.244.31.222:5000/"',
+    )
     def group_config(
-            path
+            path,
+            cortex_url
     ):
 
         import yaml
@@ -335,8 +352,10 @@ def create_bento_service_cli(
                         model_name = pipe['model-name']
                     except KeyError as e:
                         return f"ERROR : {e}"
-                    api_endpoint = complex_deploy(cortex_name, cortex_type, bento_path, region, model_name, model_type,
-                                                  model_url)
+                    api_endpoint = complex_deploy(cortex_name=cortex_name, cortex_type=cortex_type,
+                                                  bento_path=bento_path, region=region, model_name=model_name,
+                                                  model_type=model_type,
+                                                  model_url=model_url, cortex_url=cortex_url)
                 else:
                     try:
                         cortex_name = pipe['name']
@@ -344,9 +363,10 @@ def create_bento_service_cli(
                         bento_path = pipe["path"]
                     except KeyError as e:
                         return f"ERROR : {e}"
-                    api_endpoint = simple_deploy(cortex_name, cortex_type, bento_path, region)
+                    api_endpoint = simple_deploy(cortex_name=cortex_name, cortex_type=cortex_type,
+                                                 bento_path=bento_path, region=region, cortex_url=cortex_url)
                 api_endpoints.append(api_endpoint)
-        complete_endpoint = create_python_file(api_endpoints)
+        complete_endpoint = create_python_file(api_endpoints, cortex_url)
         _echo(f"You can start your pipeline at {complete_endpoint}")
 
     # Example Usage: bentoml save-direct --path={PATH}

@@ -59,7 +59,7 @@ ll={}
         parms = val['parameters'] if 'parameters' in val else []
         wht = "'" + val['key'] + "'"
         htp_met = "'" + val['http_method'].upper() + "'"
-        url = "'" + f"http://backend:8080{val['key']}" + "'"
+        url = f"os.getenv('BACKEND_URL') + '{val['key']}'"
         ss = method_head.format(what=wht, http_method=htp_met, params=parms, url=url) + method_tail
         st_complete += ss + "\n"
 
