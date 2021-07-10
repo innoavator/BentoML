@@ -152,7 +152,7 @@ class BentoServiceEnv(object):
         pip_index_url: str = None,
         pip_trusted_host: str = None,
         pip_extra_index_url: str = None,
-        infer_pip_packages: bool = False,
+        infer_pip_packages: bool = True,
         requirements_txt_file: str = None,
         conda_channels: List[str] = None,
         conda_overwrite_channels: bool = False,
